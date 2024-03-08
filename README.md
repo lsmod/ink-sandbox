@@ -10,6 +10,15 @@ cargo contract build
 cargo contract build --release
 ```
 
+### End-to-End tests
+
+Export the path to substrate-contracts-node
+export CONTRACTS_NODE="/YOUR_PATH/substrate-contracts-node"
+
+```
+cargo test --features e2e-tests
+```
+
 ### test
 
 ```

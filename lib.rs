@@ -14,10 +14,10 @@ mod hodl {
 
     impl Hodl {
         #[ink(constructor)]
-        pub fn default() -> Self {
+        pub fn new() -> Self {
             Self { 
-              balances: Default::default(),
-              hold_until_block: Default::default()
+              balances: Mapping::default(),
+              hold_until_block: Mapping::default()
             }
         }
 
@@ -105,4 +105,32 @@ mod hodl {
             assert_eq!(result, Err(()), "should not be able to deposit (second time)");
         }
     }
-  }
+
+    #[cfg(all(test, feature = "e2e-tests"))]
+    mod e2e_tests {
+        /// Imports all the definitions from the outer scope so we can use them here.
+        use super::*;
+
+        /// A helper function used for calling contract messages.
+        use ink_e2e::build_message;
+
+        /// The End-to-End test `Result` type.
+        type E2EResult<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+
+        /// We test that we can upload and instantiate the contract using its default constructor.
+        #[ink_e2e::test]
+        async fn default_works(mut client: ink_e2e::Client<C, E>) -> E2EResult<()> {
+            // Given
+            let constructor = HodlRef::new();
+
+            // When
+            let contract_account_id = client
+                .instantiate("hodl", &ink_e2e::alice(), constructor, 0, None)
+                .await
+                .expect("instantiate failed")
+                .account_id;
+            Ok(())
+        }
+        
+    }
+}
