@@ -40,11 +40,6 @@ mod hodl {
         }
 
         #[ink(message)]
-        pub fn get_holders(&self) -> bool {
-          true
-        }
-
-        #[ink(message)]
         pub fn withdraw(&mut self) -> Result<(), ()> {
           let caller_account = self.env().caller();
 
