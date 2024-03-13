@@ -32,6 +32,18 @@ mod hodl {
         }
 
         #[ink(message)]
+        pub fn get_balance(&self) -> Option<Balance> {
+            let caller = self.env().caller();
+            self.balances.get(caller)
+        }
+
+        #[ink(message)]
+        pub fn get_funds_locked_until_block(&self) -> Option<u32> {
+            let caller = self.env().caller();
+            self.hold_until_block.get(caller)
+        }
+
+        #[ink(message)]
         #[ink(payable)]
         pub fn deposit(&mut self, number_of_block: u32) -> Result<u32, Error> {
             let caller_account = self.env().caller();
