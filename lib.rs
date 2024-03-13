@@ -34,8 +34,8 @@ mod hodl {
         #[ink(message)]
         #[ink(payable)]
         pub fn deposit(&mut self, number_of_block: u32) -> Result<u32, Error> {
-            let caller_account = self.env().account_id();
-            if self.balances.contains(caller_account) {
+            let caller_account = self.env().caller();
+            if self.balances.get(caller_account).is_some() {
               return Err(Error::AlReadyDeposited);
             }
 
@@ -54,7 +54,7 @@ mod hodl {
         pub fn withdraw(&mut self) -> Result<(), Error> {
           let caller_account = self.env().caller();
 
-          if !self.balances.contains(caller_account) {
+          if self.balances.get(caller_account).is_none() {
             return Err(Error::InsufficientBalance)
           }
           if self.env().block_number() < self.hold_until_block.get(caller_account).unwrap() {
