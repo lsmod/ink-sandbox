@@ -4,12 +4,21 @@
 mod hodl {
     use ink::storage::Mapping;
 
-
     #[ink(storage)]
     #[derive(Default)]
     pub struct Hodl {
         balances: Mapping<AccountId, Balance>,
         hold_until_block: Mapping<AccountId, u32>
+    }
+
+    #[derive(Debug, PartialEq, Eq)]
+    #[ink::scale_derive(Encode, Decode, TypeInfo)]
+    pub enum Error {
+        FundsLocked,
+        BlockNumberIsTooHigh,
+        AlReadyDeposited,
+        InsufficientBalance,
+        TransferFailed,
     }
 
     impl Hodl {
@@ -23,31 +32,32 @@ mod hodl {
 
         #[ink(message)]
         #[ink(payable)]
-        pub fn deposit(&mut self, number_of_block: u32) -> Result<u32, ()> {
+        pub fn deposit(&mut self, number_of_block: u32) -> Result<u32, Error> {
             let caller_account = self.env().account_id();
             if self.balances.contains(caller_account) {
-              return Err(());
+              return Err(Error::AlReadyDeposited);
             }
 
             let current_block = self.env().block_number();
             let amount_to_deposit = self.env().transferred_value();
-            let locked_until_block = current_block + number_of_block;
-
-            self.balances.insert(caller_account, &amount_to_deposit);
-            self.hold_until_block.insert(caller_account, &locked_until_block);
-
-            Ok(locked_until_block)
+            // check for overflow when adding the block number
+            if let Some(locked_until_block) = current_block.checked_add(number_of_block) {
+                self.balances.insert(caller_account, &amount_to_deposit);
+                self.hold_until_block.insert(caller_account, &locked_until_block);
+                return Ok(locked_until_block)
+            } 
+            Err(Error::BlockNumberIsTooHigh)
         }
 
         #[ink(message)]
-        pub fn withdraw(&mut self) -> Result<(), ()> {
+        pub fn withdraw(&mut self) -> Result<(), Error> {
           let caller_account = self.env().caller();
 
           if !self.balances.contains(caller_account) {
-            return Err(())
+            return Err(Error::InsufficientBalance)
           }
           if self.env().block_number() < self.hold_until_block.get(caller_account).unwrap() {
-            return Err(())
+            return Err(Error::FundsLocked)
           }
           let owner_balance = self.balances.get(caller_account).unwrap();
 
@@ -59,7 +69,7 @@ mod hodl {
               self.hold_until_block.remove(caller_account);
               Ok(())
             },
-            Err(_) => Err(())
+            Err(_) => Err(Error::TransferFailed)
           }
         }
     }
@@ -102,7 +112,7 @@ mod hodl {
             assert_eq!(result, Ok(number_of_blocks), "should be able to deposit (first time)");
 
             let result = hold.deposit(number_of_blocks);
-            assert_eq!(result, Err(()), "should not be able to deposit (second time)");
+            assert_eq!(result, Err(Error::AlReadyDeposited), "should not be able to deposit (second time)");
         }
     }
 
@@ -110,25 +120,25 @@ mod hodl {
     mod e2e_tests {
         /// Imports all the definitions from the outer scope so we can use them here.
         use super::*;
-
+        use ink_e2e::ContractsBackend;
         /// A helper function used for calling contract messages.
-        use ink_e2e::build_message;
 
         /// The End-to-End test `Result` type.
         type E2EResult<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
         /// We test that we can upload and instantiate the contract using its default constructor.
         #[ink_e2e::test]
-        async fn default_works(mut client: ink_e2e::Client<C, E>) -> E2EResult<()> {
+        async fn default_works<Client: E2EBackend>(mut client: Client) -> E2EResult<()> {
             // Given
-            let constructor = HodlRef::new();
+            let mut constructor = HodlRef::new();
 
-            // When
             let contract_account_id = client
-                .instantiate("hodl", &ink_e2e::alice(), constructor, 0, None)
-                .await
-                .expect("instantiate failed")
-                .account_id;
+            .instantiate("hodl", &ink_e2e::alice(), &mut constructor)
+            .submit()
+            .await
+            .expect("instantiate failed")
+            .account_id;
+              // When
             Ok(())
         }
         
