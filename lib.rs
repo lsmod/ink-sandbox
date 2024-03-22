@@ -4,12 +4,20 @@
 mod hodl {
     use ink::storage::Mapping;
 
+    #[derive(scale::Decode, scale::Encode)]
+    #[cfg_attr(
+        feature = "std",
+        derive(scale_info::TypeInfo, ink::storage::traits::StorageLayout)
+    )]
+    pub struct Hodler {
+        pub balance: Balance,
+        pub hold_until_block: u32
+    }
 
     #[ink(storage)]
     #[derive(Default)]
     pub struct Hodl {
-        balances: Mapping<AccountId, Balance>,
-        hold_until_block: Mapping<AccountId, u32>
+        hodlers: Mapping<AccountId, Hodler>
     }
 
     #[derive(Debug, PartialEq, Eq, scale::Encode, scale::Decode)]
@@ -26,38 +34,41 @@ mod hodl {
         #[ink(constructor)]
         pub fn new() -> Self {
             Self { 
-              balances: Mapping::default(),
-              hold_until_block: Mapping::default()
+              hodlers: Mapping::default()
             }
         }
 
         #[ink(message)]
         pub fn get_balance(&self) -> Option<Balance> {
             let caller = self.env().caller();
-            self.balances.get(caller)
+            self.hodlers.get(caller).map(|hodler| hodler.balance)
         }
 
         #[ink(message)]
         pub fn get_funds_locked_until_block(&self) -> Option<u32> {
             let caller = self.env().caller();
-            self.hold_until_block.get(caller)
+            self.hodlers.get(caller).map(|hodler| hodler.hold_until_block)
         }
 
         #[ink(message)]
         #[ink(payable)]
         pub fn deposit(&mut self, number_of_block: u32) -> Result<u32, Error> {
             let caller_account = self.env().caller();
-            if self.balances.get(caller_account).is_some() {
-              return Err(Error::AlReadyDeposited);
+
+            if self.hodlers.get(caller_account).is_some() {
+                return Err(Error::AlReadyDeposited);
             }
 
             let current_block = self.env().block_number();
             let amount_to_deposit = self.env().transferred_value();
             // check for overflow when adding the block number
             if let Some(locked_until_block) = current_block.checked_add(number_of_block) {
-                self.balances.insert(caller_account, &amount_to_deposit);
-                self.hold_until_block.insert(caller_account, &locked_until_block);
-                return Ok(locked_until_block)
+                self.hodlers.insert(caller_account, &Hodler {
+                    balance: amount_to_deposit,
+                    hold_until_block: locked_until_block
+                });
+
+                return Ok(locked_until_block);
             } 
             Err(Error::BlockNumberIsTooHigh)
         }
@@ -65,23 +76,24 @@ mod hodl {
         #[ink(message)]
         pub fn withdraw(&mut self) -> Result<(), Error> {
           let caller_account = self.env().caller();
+          let hodler = self.hodlers.get(caller_account);
+          match hodler {
+            None => return Err(Error::InsufficientBalance),
+            Some(hodler) => {
+              if self.env().block_number() < hodler.hold_until_block {
+                return Err(Error::FundsLocked)
+              }
+              let owner_balance = hodler.balance;
 
-          if self.balances.get(caller_account).is_none() {
-            return Err(Error::InsufficientBalance)
-          }
-          if self.env().block_number() < self.hold_until_block.get(caller_account).unwrap() {
-            return Err(Error::FundsLocked)
-          }
-          let owner_balance = self.balances.get(caller_account).unwrap();
-
-          let transfert_result = self.env().transfer(caller_account, owner_balance);
-          match transfert_result {
-            Ok(_) => {
-              self.balances.remove(caller_account);
-              self.hold_until_block.remove(caller_account);
-              Ok(())
-            },
-            Err(_) => Err(Error::TransferFailed)
+              let transfert_result = self.env().transfer(caller_account, owner_balance);
+              match transfert_result {
+                Ok(_) => {
+                  self.hodlers.remove(caller_account);
+                  Ok(())
+                },
+                Err(_) => Err(Error::TransferFailed)
+              }
+            }
           }
         }
     }
@@ -107,8 +119,8 @@ mod hodl {
             let result = hold.deposit(number_of_blocks);
             assert_eq!(result, Ok(number_of_blocks));
 
-            assert_eq!(hold.balances.get(accounts.alice), Some(amout_to_transfer), "balance should be transfered value");
-            assert_eq!(hold.hold_until_block.get(accounts.alice), Some(number_of_blocks), "should hold until {} block", number_of_blocks);           
+            assert_eq!(hold.hodlers.get(accounts.alice).unwrap().balance, amout_to_transfer, "balance should be transfered value");
+            assert_eq!(hold.hodlers.get(accounts.alice).unwrap().hold_until_block, number_of_blocks, "should hold until {} block", number_of_blocks);           
         }
 
         #[ink::test]
@@ -124,7 +136,7 @@ mod hodl {
             assert_eq!(result, Ok(number_of_blocks), "should be able to deposit (first time)");
 
             let result = hold.deposit(number_of_blocks);
-            assert_eq!(result, Err(()), "should not be able to deposit (second time)");
+            assert_eq!(result, Err(Error::AlReadyDeposited), "should not be able to deposit (second time)");
         }
     }
     
